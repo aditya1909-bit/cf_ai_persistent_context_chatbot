@@ -1,7 +1,5 @@
 # PROMPTS
 
-This file catalogs technical prompts used to design and implement the project. Prompts are written in a precise, implementation-driven style for reproducibility.
-
 1. **Architecture Definition**
    - "Design a Cloudflare Workers + Durable Objects architecture for persistent chat sessions. Specify how each conversation is mapped to a Durable Object instance, what data is stored, and how context is reconstructed for each request."
 

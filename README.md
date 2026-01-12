@@ -53,6 +53,7 @@ npm run dev
 Open the UI:
 
 - `http://localhost:8787/`
+- `https://cf-ai-persistent-context-chatbot.adityasdutta.workers.dev`
 
 ### API Quick Test
 

@@ -729,7 +729,10 @@ export class ChatDurableObject extends DurableObject<Env> {
 				const quota = await this.reserveQuota(MAX_OUTPUT_TOKENS);
 				if (!quota.allowed) {
 					return jsonResponse(
-						{ error: "Daily AI quota exceeded. Try again tomorrow." },
+						{
+							error:
+								"No more chats are available for today. Please come back tomorrow.",
+						},
 						{ status: 429 },
 					);
 				}
