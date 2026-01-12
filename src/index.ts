@@ -25,6 +25,7 @@ type ChatMessage = {
 
 type ChatRequest = {
 	message: string;
+	systemPrompt?: string;
 };
 
 type AiChatMessage = {
@@ -48,7 +49,7 @@ type AiBinding = {
 	run: (model: string, options: AiRunOptions) => Promise<AiRunResult | string>;
 };
 
-const MODEL = "@cf/meta/llama-3.3-70b-instruct";
+const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const TOKEN_BUDGET = 4000;
 const MAX_OUTPUT_TOKENS = 512;
 const TOKEN_CHAR_RATIO = 4;
@@ -56,6 +57,273 @@ const DAILY_OUTPUT_TOKEN_LIMIT = 10000;
 const MAX_MESSAGES = 40;
 const SUMMARIZE_BATCH = 20;
 const MAX_SUMMARY_CHARS = 2000;
+
+const CHAT_UI_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Context Chat</title>
+    <style>
+      :root {
+        --bg-1: #f7f1e8;
+        --bg-2: #f3e6d0;
+        --bg-3: #fbe7cc;
+        --ink: #1f1b16;
+        --muted: #6a5f54;
+        --accent: #c9572c;
+        --card: #fffaf2;
+        --shadow: rgba(31, 27, 22, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(1200px 800px at 10% 10%, var(--bg-3), transparent 60%),
+          radial-gradient(900px 600px at 90% 20%, #f1dcc6, transparent 55%),
+          linear-gradient(140deg, var(--bg-1), var(--bg-2));
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 32px 16px;
+      }
+      .shell {
+        width: min(880px, 100%);
+        background: var(--card);
+        border-radius: 28px;
+        box-shadow: 0 20px 60px var(--shadow);
+        padding: 28px;
+        display: grid;
+        gap: 20px;
+        position: relative;
+        overflow: hidden;
+      }
+      .shell::before {
+        content: "";
+        position: absolute;
+        inset: -60% 30% auto -40%;
+        height: 200px;
+        background: linear-gradient(120deg, rgba(201, 87, 44, 0.16), transparent);
+        transform: rotate(-8deg);
+        pointer-events: none;
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+      h1 {
+        font-size: clamp(1.6rem, 2vw + 1.2rem, 2.6rem);
+        margin: 0;
+        letter-spacing: -0.02em;
+      }
+      .tag {
+        font-size: 0.85rem;
+        color: var(--muted);
+        letter-spacing: 0.2em;
+        text-transform: uppercase;
+      }
+      .messages {
+        display: grid;
+        gap: 14px;
+        max-height: 52vh;
+        overflow-y: auto;
+        padding-right: 6px;
+      }
+      .msg {
+        padding: 14px 16px;
+        border-radius: 16px;
+        background: #f1ebe2;
+        line-height: 1.4;
+        animation: rise 0.3s ease both;
+      }
+      .msg.user {
+        background: #f7d8c1;
+        justify-self: end;
+      }
+      .msg.assistant {
+        background: #f1f0ee;
+        border: 1px solid #eadfd3;
+      }
+      .composer {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+        align-items: center;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: center;
+      }
+      .system-prompt {
+        display: grid;
+        gap: 6px;
+      }
+      .system-prompt label {
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      textarea {
+        width: 100%;
+        min-height: 56px;
+        max-height: 140px;
+        resize: vertical;
+        border-radius: 16px;
+        border: 1px solid #e2d5c7;
+        padding: 12px 14px;
+        font: inherit;
+        background: #fffdf9;
+      }
+      button {
+        border: none;
+        background: var(--accent);
+        color: white;
+        font-weight: 600;
+        padding: 14px 20px;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        box-shadow: 0 10px 20px rgba(201, 87, 44, 0.25);
+      }
+      .ghost {
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid rgba(201, 87, 44, 0.35);
+        box-shadow: none;
+      }
+      button:active { transform: translateY(1px) scale(0.98); }
+      .meta {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .meta strong {
+        color: var(--ink);
+      }
+      @keyframes rise {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <h1>Context Chat</h1>
+        <span class="tag">persistent memory</span>
+      </header>
+      <section class="messages" id="messages"></section>
+      <div class="meta">
+        <span id="conversation"></span>
+        <span id="usage"></span>
+        <span id="status">Ready</span>
+      </div>
+      <form class="composer" id="composer">
+        <div class="system-prompt">
+          <label for="system">System prompt</label>
+          <textarea id="system" placeholder="Define behavior for the assistant..."></textarea>
+        </div>
+        <div class="controls">
+          <textarea id="input" placeholder="Say something thoughtful..." required></textarea>
+          <button type="submit">Send</button>
+        </div>
+        <div class="controls">
+          <button type="button" class="ghost" id="reset">Clear chat</button>
+        </div>
+      </form>
+    </main>
+    <script>
+      const messagesEl = document.getElementById("messages");
+      const inputEl = document.getElementById("input");
+      const statusEl = document.getElementById("status");
+      const usageEl = document.getElementById("usage");
+      const conversationEl = document.getElementById("conversation");
+      const systemEl = document.getElementById("system");
+      const conversationId = localStorage.getItem("conversationId") || crypto.randomUUID();
+      localStorage.setItem("conversationId", conversationId);
+      conversationEl.textContent = "Conversation: " + conversationId.slice(0, 8);
+      systemEl.value = localStorage.getItem("systemPrompt") || "";
+
+      function addMessage(role, content) {
+        const div = document.createElement("div");
+        div.className = "msg " + role;
+        div.textContent = content;
+        messagesEl.appendChild(div);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+
+      async function loadHistory() {
+        try {
+          const res = await fetch("/history?conversationId=" + conversationId);
+          if (!res.ok) return;
+          const data = await res.json();
+          if (Array.isArray(data.messages)) {
+            data.messages.forEach((msg) => addMessage(msg.role, msg.content));
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      async function sendMessage(message) {
+        statusEl.textContent = "Thinking...";
+        const res = await fetch("/chat", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            conversationId,
+            message,
+            systemPrompt: systemEl.value.trim() || undefined,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          statusEl.textContent = "Error";
+          addMessage("assistant", data.error || "Request failed");
+          return;
+        }
+        statusEl.textContent = "Ready";
+        if (data.usage) {
+          usageEl.innerHTML = "Tokens: <strong>" + data.usage.outputTokens + "</strong> / " + data.usage.dailyLimit;
+        }
+        addMessage("assistant", data.reply);
+      }
+
+      document.getElementById("composer").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = inputEl.value.trim();
+        if (!message) return;
+        inputEl.value = "";
+        addMessage("user", message);
+        const nextSystem = systemEl.value.trim();
+        if (nextSystem !== localStorage.getItem("systemPrompt")) {
+          localStorage.setItem("systemPrompt", nextSystem);
+        }
+        await sendMessage(message);
+      });
+
+      document.getElementById("reset").addEventListener("click", async () => {
+        statusEl.textContent = "Clearing...";
+        await fetch("/reset", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ conversationId }),
+        });
+        messagesEl.innerHTML = "";
+        statusEl.textContent = "Ready";
+        usageEl.textContent = "";
+      });
+
+      loadHistory();
+    </script>
+  </body>
+</html>`;
 
 const corsHeaders = {
 	"access-control-allow-origin": "*",
@@ -80,7 +348,7 @@ function formatSummaryLine(message: Pick<ChatMessage, "role" | "content">): stri
 	return `${message.role}: ${message.content}`;
 }
 
-export class MyDurableObject extends DurableObject<Env> {
+export class ChatDurableObject extends DurableObject<Env> {
 	private sql: DurableObjectState["storage"]["sql"];
 	private env: Env & { AI: AiBinding };
 
@@ -125,6 +393,18 @@ export class MyDurableObject extends DurableObject<Env> {
 
 	private setSummary(summary: string): void {
 		this.setKvValue("summary", summary);
+	}
+
+	private getSystemPrompt(): string | null {
+		return this.getKvValue("system_prompt");
+	}
+
+	private setSystemPrompt(prompt: string | null): void {
+		if (!prompt) {
+			this.sql.exec("DELETE FROM kv WHERE key = ?", "system_prompt");
+			return;
+		}
+		this.setKvValue("system_prompt", prompt);
 	}
 
 	private insertMessage(role: ChatRole, content: string): void {
@@ -262,9 +542,16 @@ export class MyDurableObject extends DurableObject<Env> {
 		}, 0);
 	}
 
-	private buildPromptMessages(history: ChatMessage[], summary: string | null): AiChatMessage[] {
+	private buildPromptMessages(
+		history: ChatMessage[],
+		summary: string | null,
+		systemPrompt: string | null,
+	): AiChatMessage[] {
 		const baseMessages: AiChatMessage[] = [
-			{ role: "system", content: "You are a helpful assistant." },
+			{
+				role: "system",
+				content: systemPrompt?.trim() || "You are a helpful assistant.",
+			},
 		];
 		let summaryMessage: AiChatMessage | null = null;
 		if (summary) {
@@ -335,8 +622,10 @@ export class MyDurableObject extends DurableObject<Env> {
 	private async generateAssistantReply(
 		history: ChatMessage[],
 		summary: string | null,
-	): Promise<string> {
-		const messages = this.buildPromptMessages(history, summary);
+		systemPrompt: string | null,
+	): Promise<{ reply: string; promptTokens: number }> {
+		const messages = this.buildPromptMessages(history, summary, systemPrompt);
+		const promptTokens = this.estimateMessageTokens(messages);
 		const result = await this.env.AI.run(MODEL, {
 			messages,
 			max_tokens: MAX_OUTPUT_TOKENS,
@@ -346,7 +635,7 @@ export class MyDurableObject extends DurableObject<Env> {
 		if (!reply) {
 			throw new Error("Empty AI response");
 		}
-		return reply.trim();
+		return { reply: reply.trim(), promptTokens };
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -452,20 +741,32 @@ export class MyDurableObject extends DurableObject<Env> {
 				);
 			}
 
+			if (typeof payload.systemPrompt === "string") {
+				this.setSystemPrompt(payload.systemPrompt.trim() || null);
+			}
 			this.insertMessage("user", payload.message);
 			const summary = this.getSummary();
 			const history = this.listRecentMessages(MAX_MESSAGES);
 			try {
-				const reply = await this.generateAssistantReply(history, summary);
+				const systemPrompt = this.getSystemPrompt();
+				const result = await this.generateAssistantReply(history, summary, systemPrompt);
 				const outputTokens = Math.min(
-					this.estimateTokens(reply),
+					this.estimateTokens(result.reply),
 					reservation?.maxTokens ?? MAX_OUTPUT_TOKENS,
 				);
 				await this.commitQuota(reservation?.maxTokens ?? MAX_OUTPUT_TOKENS, outputTokens);
-				this.insertMessage("assistant", reply);
+				this.insertMessage("assistant", result.reply);
 				this.summarizeIfNeeded();
 
-				return jsonResponse({ reply, summary: this.getSummary() });
+				return jsonResponse({
+					reply: result.reply,
+					summary: this.getSummary(),
+					usage: {
+						promptTokens: result.promptTokens,
+						outputTokens,
+						dailyLimit: DAILY_OUTPUT_TOKEN_LIMIT,
+					},
+				});
 			} catch (error) {
 				if (reservation) {
 					await this.commitQuota(reservation.maxTokens, 0);
@@ -492,10 +793,18 @@ export class MyDurableObject extends DurableObject<Env> {
 			}
 			this.sql.exec("DELETE FROM messages");
 			this.sql.exec("DELETE FROM kv WHERE key = ?", "summary");
+			this.sql.exec("DELETE FROM kv WHERE key = ?", "system_prompt");
 			return jsonResponse({ ok: true });
 		}
 
 		return errorResponse("Not found", 404);
+	}
+}
+
+// Legacy class retained for existing Durable Objects in production.
+export class MyDurableObject extends DurableObject<Env> {
+	async fetch(): Promise<Response> {
+		return errorResponse("Legacy Durable Object no longer supported.", 410);
 	}
 }
 
@@ -521,6 +830,12 @@ export default {
 		const url = new URL(request.url);
 		if (request.method === "OPTIONS") {
 			return new Response(null, { status: 204, headers: corsHeaders });
+		}
+
+		if (url.pathname === "/") {
+			return new Response(CHAT_UI_HTML, {
+				headers: { "content-type": "text/html; charset=utf-8" },
+			});
 		}
 
 		if (!["/chat", "/history", "/reset"].includes(url.pathname)) {

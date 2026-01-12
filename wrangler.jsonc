@@ -10,15 +10,15 @@
 	"migrations": [
 		{
 			"new_sqlite_classes": [
-				"MyDurableObject"
+				"ChatDurableObject"
 			],
-			"tag": "v1"
+			"tag": "v2"
 		}
 	],
 	"durable_objects": {
 		"bindings": [
 			{
-				"class_name": "MyDurableObject",
+				"class_name": "ChatDurableObject",
 				"name": "MY_DURABLE_OBJECT"
 			}
 		]
